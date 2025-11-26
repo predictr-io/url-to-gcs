@@ -1,0 +1,39 @@
+{
+    "name": "url-to-gcs",
+    "version": "0.1.0",
+    "description": "GitHub Action to fetch content from any URL and upload to Google Cloud Storage",
+    "main": "dist/index.js",
+    "scripts": {
+        "build": "ncc build src/index.ts -o dist --source-map --license licenses.txt",
+        "lint": "eslint src/",
+        "type-check": "tsc --noEmit",
+        "check": "npm run type-check && npm run lint",
+        "test": "echo \"Error: no test specified\" && exit 1"
+    },
+    "keywords": [
+        "github-action",
+        "gcp",
+        "google-cloud",
+        "gcs",
+        "cloud-storage",
+        "url",
+        "download"
+    ],
+    "author": "predictr-io",
+    "license": "MIT",
+    "dependencies": {
+        "@actions/core": "^1.11.1",
+        "@google-cloud/storage": "^7.14.0",
+        "axios": "^1.7.9"
+    },
+    "devDependencies": {
+        "@eslint/js": "^9.39.1",
+        "@types/node": "^22.10.1",
+        "@typescript-eslint/eslint-plugin": "^8.47.0",
+        "@typescript-eslint/parser": "^8.47.0",
+        "@vercel/ncc": "^0.38.3",
+        "depcheck": "^1.4.7",
+        "eslint": "^9.39.1",
+        "typescript": "^5.7.2"
+    }
+}

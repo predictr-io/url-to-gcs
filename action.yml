@@ -1,0 +1,85 @@
+name: 'URL to GCS'
+description: 'Fetch content from any URL and upload directly to Google Cloud Storage'
+author: 'predictr-io'
+
+branding:
+  icon: 'download-cloud'
+  color: 'blue'
+
+inputs:
+  url:
+    description: 'URL to fetch content from'
+    required: true
+  gcs-bucket:
+    description: 'GCS bucket name'
+    required: true
+  gcs-object:
+    description: 'Object name/path in GCS'
+    required: true
+  
+  # HTTP Options
+  method:
+    description: 'HTTP method (GET, POST, PUT, PATCH, DELETE)'
+    required: false
+    default: 'GET'
+  headers:
+    description: 'HTTP headers as JSON or semicolon-separated key=value pairs'
+    required: false
+  post-data:
+    description: 'POST/PUT request body data'
+    required: false
+  timeout:
+    description: 'Request timeout in milliseconds'
+    required: false
+    default: '900000'
+  enable-retry:
+    description: 'Enable automatic retry on failures'
+    required: false
+    default: 'false'
+  
+  # Authentication Options
+  auth-type:
+    description: 'Authentication type: none, basic, or bearer'
+    required: false
+    default: 'none'
+  auth-username:
+    description: 'Username for basic authentication'
+    required: false
+  auth-password:
+    description: 'Password for basic authentication'
+    required: false
+  auth-token:
+    description: 'Token for bearer authentication'
+    required: false
+  
+  # GCS Options
+  content-type:
+    description: 'Override Content-Type for GCS object'
+    required: false
+  cache-control:
+    description: 'Cache-Control header for GCS object'
+    required: false
+  metadata:
+    description: 'Custom metadata as JSON or semicolon-separated key=value pairs'
+    required: false
+  storage-class:
+    description: 'GCS storage class (STANDARD, NEARLINE, COLDLINE, ARCHIVE)'
+    required: false
+    default: 'STANDARD'
+  predefined-acl:
+    description: 'Predefined ACL (private, publicRead, bucketOwnerRead, etc.)'
+    required: false
+
+outputs:
+  status-code:
+    description: 'HTTP status code from the URL request'
+  content-length:
+    description: 'Size of downloaded content in bytes'
+  gcs-url:
+    description: 'GCS URL of uploaded object (gs://bucket/object format)'
+  generation:
+    description: 'Generation number of the uploaded GCS object'
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
