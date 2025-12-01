@@ -70,6 +70,11 @@ inputs:
     description: 'Predefined ACL (private, publicRead, bucketOwnerRead, etc.)'
     required: false
 
+  if-not-exists:
+    description: 'Only upload if the GCS object does not already exist (default: false)'
+    required: false
+    default: 'false'
+
 outputs:
   status-code:
     description: 'HTTP status code from the URL request'
@@ -79,6 +84,9 @@ outputs:
     description: 'GCS URL of uploaded object (gs://bucket/object format)'
   generation:
     description: 'Generation number of the uploaded GCS object'
+
+  object-existed:
+    description: 'Whether the object already existed (true if upload was skipped due to if-not-exists, false if object was uploaded)'
 
 runs:
   using: 'node24'

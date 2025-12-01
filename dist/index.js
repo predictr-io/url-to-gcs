@@ -60968,6 +60968,7 @@ async function run() {
         const metadataInput = core.getInput('metadata');
         const storageClass = core.getInput('storage-class') || 'STANDARD';
         const predefinedAcl = core.getInput('predefined-acl');
+        const ifNotExists = core.getInput('if-not-exists') === 'true';
         // Parse headers and metadata
         const headers = (0, download_1.parseHeaders)(headersInput);
         const metadata = (0, upload_1.parseMetadata)(metadataInput);
@@ -60999,21 +61000,34 @@ async function run() {
             metadata,
             storageClass,
             predefinedAcl: predefinedAcl || undefined,
-        });
-        core.info('Stream upload completed successfully');
-        // Get actual bytes transferred (now that the stream has been fully consumed)
-        const actualBytesTransferred = downloadResult.stream.getBytesTransferred();
-        core.info(`Total bytes transferred: ${actualBytesTransferred} bytes (${(actualBytesTransferred / 1024 / 1024).toFixed(2)} MB)`);
-        // Verify against header if it was provided
-        if (downloadResult.contentLengthHeader > 0 && actualBytesTransferred !== downloadResult.contentLengthHeader) {
-            core.warning(`Bytes transferred (${actualBytesTransferred}) differs from Content-Length header (${downloadResult.contentLengthHeader})`);
+        }, ifNotExists);
+        // Check if upload was skipped due to existing object
+        if (uploadResult.objectExisted) {
+            core.info('✓ Action completed - object already existed, upload skipped');
+            // Set outputs for skipped upload
+            core.setOutput('status-code', downloadResult.statusCode.toString());
+            core.setOutput('content-length', '0'); // No bytes transferred
+            core.setOutput('gcs-url', uploadResult.gcsUrl);
+            core.setOutput('generation', uploadResult.generation); // Empty string
+            core.setOutput('object-existed', 'true');
         }
-        // Set all outputs ONLY after the entire operation succeeds
-        core.setOutput('status-code', downloadResult.statusCode.toString());
-        core.setOutput('content-length', actualBytesTransferred.toString()); // Use actual bytes, not header
-        core.setOutput('gcs-url', uploadResult.gcsUrl);
-        core.setOutput('generation', uploadResult.generation);
-        core.info('✓ Action completed successfully - content streamed directly to GCS');
+        else {
+            core.info('Stream upload completed successfully');
+            // Get actual bytes transferred (now that the stream has been fully consumed)
+            const actualBytesTransferred = downloadResult.stream.getBytesTransferred();
+            core.info(`Total bytes transferred: ${actualBytesTransferred} bytes (${(actualBytesTransferred / 1024 / 1024).toFixed(2)} MB)`);
+            // Verify against header if it was provided
+            if (downloadResult.contentLengthHeader > 0 && actualBytesTransferred !== downloadResult.contentLengthHeader) {
+                core.warning(`Bytes transferred (${actualBytesTransferred}) differs from Content-Length header (${downloadResult.contentLengthHeader})`);
+            }
+            // Set all outputs ONLY after the entire operation succeeds
+            core.setOutput('status-code', downloadResult.statusCode.toString());
+            core.setOutput('content-length', actualBytesTransferred.toString()); // Use actual bytes, not header
+            core.setOutput('gcs-url', uploadResult.gcsUrl);
+            core.setOutput('generation', uploadResult.generation);
+            core.setOutput('object-existed', 'false');
+            core.info('✓ Action completed successfully - content streamed directly to GCS');
+        }
     }
     catch (error) {
         // Provide comprehensive error information for debugging
@@ -61121,6 +61135,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.parseKeyValuePairs = parseKeyValuePairs;
 exports.parseMetadata = parseMetadata;
+exports.objectExists = objectExists;
 exports.uploadStreamToGCS = uploadStreamToGCS;
 const core = __importStar(__nccwpck_require__(7484));
 const storage_1 = __nccwpck_require__(8525);
@@ -61211,10 +61226,24 @@ function validatePredefinedAcl(acl) {
     return acl;
 }
 /**
+ * Check if a GCS object exists
+ * Returns true if the object exists, false otherwise
+ */
+async function objectExists(storage, bucket, objectName) {
+    try {
+        const [exists] = await storage.bucket(bucket).file(objectName).exists();
+        return exists;
+    }
+    catch (error) {
+        // Re-throw errors (permissions, etc.)
+        throw error;
+    }
+}
+/**
  * Upload stream to GCS
  * Streams data directly to GCS without storing locally
  */
-async function uploadStreamToGCS(options) {
+async function uploadStreamToGCS(options, ifNotExists = false) {
     core.info(`Uploading to GCS: gs://${options.bucket}/${options.objectName}`);
     // Validate inputs
     const storageClass = validateStorageClass(options.storageClass);
@@ -61223,6 +61252,22 @@ async function uploadStreamToGCS(options) {
     // Uses Application Default Credentials (ADC) from environment
     // Set via google-github-actions/auth or GOOGLE_APPLICATION_CREDENTIALS
     const storage = new storage_1.Storage();
+    // Check if object exists (if requested)
+    if (ifNotExists) {
+        core.info('Checking if object already exists in GCS...');
+        const exists = await objectExists(storage, options.bucket, options.objectName);
+        if (exists) {
+            core.info(`Object already exists at gs://${options.bucket}/${options.objectName}`);
+            core.info('Skipping upload due to if-not-exists flag');
+            // Return result with objectExisted flag
+            return {
+                generation: '',
+                gcsUrl: `gs://${options.bucket}/${options.objectName}`,
+                objectExisted: true,
+            };
+        }
+        core.info('Object does not exist, proceeding with upload');
+    }
     // Log content length hint if known
     if (options.contentLengthHint && options.contentLengthHint > 0) {
         core.info(`Content-Length hint: ${options.contentLengthHint} bytes (${(options.contentLengthHint / 1024 / 1024).toFixed(2)} MB)`);
@@ -61296,6 +61341,7 @@ async function uploadStreamToGCS(options) {
         return {
             generation,
             gcsUrl,
+            objectExisted: false,
         };
     }
     catch (error) {

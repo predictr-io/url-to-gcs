@@ -29,6 +29,7 @@ async function run(): Promise<void> {
     const metadataInput = core.getInput('metadata');
     const storageClass = core.getInput('storage-class') || 'STANDARD';
     const predefinedAcl = core.getInput('predefined-acl');
+    const ifNotExists = core.getInput('if-not-exists') === 'true';
 
     // Parse headers and metadata
     const headers = parseHeaders(headersInput);
@@ -66,28 +67,41 @@ async function run(): Promise<void> {
       metadata,
       storageClass,
       predefinedAcl: predefinedAcl || undefined,
-    });
+    }, ifNotExists);
 
-    core.info('Stream upload completed successfully');
+    // Check if upload was skipped due to existing object
+    if (uploadResult.objectExisted) {
+      core.info('✓ Action completed - object already existed, upload skipped');
 
-    // Get actual bytes transferred (now that the stream has been fully consumed)
-    const actualBytesTransferred = downloadResult.stream.getBytesTransferred();
-    core.info(`Total bytes transferred: ${actualBytesTransferred} bytes (${(actualBytesTransferred / 1024 / 1024).toFixed(2)} MB)`);
+      // Set outputs for skipped upload
+      core.setOutput('status-code', downloadResult.statusCode.toString());
+      core.setOutput('content-length', '0'); // No bytes transferred
+      core.setOutput('gcs-url', uploadResult.gcsUrl);
+      core.setOutput('generation', uploadResult.generation); // Empty string
+      core.setOutput('object-existed', 'true');
+    } else {
+      core.info('Stream upload completed successfully');
 
-    // Verify against header if it was provided
-    if (downloadResult.contentLengthHeader > 0 && actualBytesTransferred !== downloadResult.contentLengthHeader) {
-      core.warning(
-        `Bytes transferred (${actualBytesTransferred}) differs from Content-Length header (${downloadResult.contentLengthHeader})`
-      );
+      // Get actual bytes transferred (now that the stream has been fully consumed)
+      const actualBytesTransferred = downloadResult.stream.getBytesTransferred();
+      core.info(`Total bytes transferred: ${actualBytesTransferred} bytes (${(actualBytesTransferred / 1024 / 1024).toFixed(2)} MB)`);
+
+      // Verify against header if it was provided
+      if (downloadResult.contentLengthHeader > 0 && actualBytesTransferred !== downloadResult.contentLengthHeader) {
+        core.warning(
+          `Bytes transferred (${actualBytesTransferred}) differs from Content-Length header (${downloadResult.contentLengthHeader})`
+        );
+      }
+
+      // Set all outputs ONLY after the entire operation succeeds
+      core.setOutput('status-code', downloadResult.statusCode.toString());
+      core.setOutput('content-length', actualBytesTransferred.toString()); // Use actual bytes, not header
+      core.setOutput('gcs-url', uploadResult.gcsUrl);
+      core.setOutput('generation', uploadResult.generation);
+      core.setOutput('object-existed', 'false');
+
+      core.info('✓ Action completed successfully - content streamed directly to GCS');
     }
-
-    // Set all outputs ONLY after the entire operation succeeds
-    core.setOutput('status-code', downloadResult.statusCode.toString());
-    core.setOutput('content-length', actualBytesTransferred.toString()); // Use actual bytes, not header
-    core.setOutput('gcs-url', uploadResult.gcsUrl);
-    core.setOutput('generation', uploadResult.generation);
-
-    core.info('✓ Action completed successfully - content streamed directly to GCS');
   } catch (error) {
     // Provide comprehensive error information for debugging
     core.error('Action failed with error:');
