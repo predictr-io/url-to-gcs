@@ -1,6 +1,21 @@
 import * as core from '@actions/core';
+import { Storage } from '@google-cloud/storage';
 import { downloadAsStream, parseHeaders } from './download';
 import { uploadStreamToGCS, parseMetadata } from './upload';
+
+/**
+ * Check if a GCS object exists
+ * Returns true if the object exists, false otherwise
+ */
+async function objectExists(storage: Storage, bucket: string, objectName: string): Promise<boolean> {
+  try {
+    const [exists] = await storage.bucket(bucket).file(objectName).exists();
+    return exists;
+  } catch (error: any) {
+    // Re-throw errors (permissions, etc.)
+    throw error;
+  }
+}
 
 /**
  * Main action entry point
@@ -35,6 +50,31 @@ async function run(): Promise<void> {
     const headers = parseHeaders(headersInput);
     const metadata = parseMetadata(metadataInput);
 
+    // Check if object exists BEFORE downloading (if if-not-exists flag is set)
+    // This avoids unnecessary bandwidth usage when the object already exists
+    if (ifNotExists) {
+      core.info('Checking if GCS object already exists...');
+      const storage = new Storage();
+      const exists = await objectExists(storage, gcsBucket, gcsObject);
+
+      if (exists) {
+        core.info(`Object already exists at gs://${gcsBucket}/${gcsObject}`);
+        core.info('Skipping download and upload due to if-not-exists flag');
+
+        // Set outputs for skipped operation
+        core.setOutput('status-code', '0'); // No HTTP request made
+        core.setOutput('content-length', '0'); // No bytes transferred
+        core.setOutput('gcs-url', `gs://${gcsBucket}/${gcsObject}`);
+        core.setOutput('generation', ''); // Unknown generation
+        core.setOutput('object-existed', 'true');
+
+        core.info('✓ Action completed - object already existed, no download or upload needed');
+        return; // Exit early
+      }
+
+      core.info('Object does not exist, proceeding with download and upload');
+    }
+
     core.info('Starting streaming download from URL...');
 
     // Download from URL (returns a stream)
@@ -57,6 +97,7 @@ async function run(): Promise<void> {
     const contentType = contentTypeOverride || downloadResult.contentType;
 
     // Upload to GCS (streaming directly from download)
+    // Note: We've already checked if-not-exists upfront, so no need to check again
     const uploadResult = await uploadStreamToGCS({
       bucket: gcsBucket,
       objectName: gcsObject,
@@ -67,41 +108,30 @@ async function run(): Promise<void> {
       metadata,
       storageClass,
       predefinedAcl: predefinedAcl || undefined,
-    }, ifNotExists);
+    });
 
-    // Check if upload was skipped due to existing object
-    if (uploadResult.objectExisted) {
-      core.info('✓ Action completed - object already existed, upload skipped');
+    // Upload completed successfully
+    core.info('Stream upload completed successfully');
 
-      // Set outputs for skipped upload
-      core.setOutput('status-code', downloadResult.statusCode.toString());
-      core.setOutput('content-length', '0'); // No bytes transferred
-      core.setOutput('gcs-url', uploadResult.gcsUrl);
-      core.setOutput('generation', uploadResult.generation); // Empty string
-      core.setOutput('object-existed', 'true');
-    } else {
-      core.info('Stream upload completed successfully');
+    // Get actual bytes transferred (now that the stream has been fully consumed)
+    const actualBytesTransferred = downloadResult.stream.getBytesTransferred();
+    core.info(`Total bytes transferred: ${actualBytesTransferred} bytes (${(actualBytesTransferred / 1024 / 1024).toFixed(2)} MB)`);
 
-      // Get actual bytes transferred (now that the stream has been fully consumed)
-      const actualBytesTransferred = downloadResult.stream.getBytesTransferred();
-      core.info(`Total bytes transferred: ${actualBytesTransferred} bytes (${(actualBytesTransferred / 1024 / 1024).toFixed(2)} MB)`);
-
-      // Verify against header if it was provided
-      if (downloadResult.contentLengthHeader > 0 && actualBytesTransferred !== downloadResult.contentLengthHeader) {
-        core.warning(
-          `Bytes transferred (${actualBytesTransferred}) differs from Content-Length header (${downloadResult.contentLengthHeader})`
-        );
-      }
-
-      // Set all outputs ONLY after the entire operation succeeds
-      core.setOutput('status-code', downloadResult.statusCode.toString());
-      core.setOutput('content-length', actualBytesTransferred.toString()); // Use actual bytes, not header
-      core.setOutput('gcs-url', uploadResult.gcsUrl);
-      core.setOutput('generation', uploadResult.generation);
-      core.setOutput('object-existed', 'false');
-
-      core.info('✓ Action completed successfully - content streamed directly to GCS');
+    // Verify against header if it was provided
+    if (downloadResult.contentLengthHeader > 0 && actualBytesTransferred !== downloadResult.contentLengthHeader) {
+      core.warning(
+        `Bytes transferred (${actualBytesTransferred}) differs from Content-Length header (${downloadResult.contentLengthHeader})`
+      );
     }
+
+    // Set all outputs ONLY after the entire operation succeeds
+    core.setOutput('status-code', downloadResult.statusCode.toString());
+    core.setOutput('content-length', actualBytesTransferred.toString()); // Use actual bytes, not header
+    core.setOutput('gcs-url', uploadResult.gcsUrl);
+    core.setOutput('generation', uploadResult.generation);
+    core.setOutput('object-existed', 'false');
+
+    core.info('✓ Action completed successfully - content streamed directly to GCS');
   } catch (error) {
     // Provide comprehensive error information for debugging
     core.error('Action failed with error:');

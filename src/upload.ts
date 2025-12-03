@@ -125,24 +125,13 @@ function validatePredefinedAcl(acl?: string): string | undefined {
 }
 
 /**
- * Check if a GCS object exists
- * Returns true if the object exists, false otherwise
- */
-export async function objectExists(storage: Storage, bucket: string, objectName: string): Promise<boolean> {
-  try {
-    const [exists] = await storage.bucket(bucket).file(objectName).exists();
-    return exists;
-  } catch (error: any) {
-    // Re-throw errors (permissions, etc.)
-    throw error;
-  }
-}
-
-/**
  * Upload stream to GCS
  * Streams data directly to GCS without storing locally
+ *
+ * Note: The if-not-exists check is now performed in index.ts BEFORE downloading,
+ * so this function no longer needs the ifNotExists parameter.
  */
-export async function uploadStreamToGCS(options: UploadOptions, ifNotExists = false): Promise<UploadResult> {
+export async function uploadStreamToGCS(options: UploadOptions): Promise<UploadResult> {
   core.info(`Uploading to GCS: gs://${options.bucket}/${options.objectName}`);
 
   // Validate inputs
@@ -153,26 +142,6 @@ export async function uploadStreamToGCS(options: UploadOptions, ifNotExists = fa
   // Uses Application Default Credentials (ADC) from environment
   // Set via google-github-actions/auth or GOOGLE_APPLICATION_CREDENTIALS
   const storage = new Storage();
-
-  // Check if object exists (if requested)
-  if (ifNotExists) {
-    core.info('Checking if object already exists in GCS...');
-    const exists = await objectExists(storage, options.bucket, options.objectName);
-
-    if (exists) {
-      core.info(`Object already exists at gs://${options.bucket}/${options.objectName}`);
-      core.info('Skipping upload due to if-not-exists flag');
-
-      // Return result with objectExisted flag
-      return {
-        generation: '',
-        gcsUrl: `gs://${options.bucket}/${options.objectName}`,
-        objectExisted: true,
-      };
-    }
-
-    core.info('Object does not exist, proceeding with upload');
-  }
 
   // Log content length hint if known
   if (options.contentLengthHint && options.contentLengthHint > 0) {
